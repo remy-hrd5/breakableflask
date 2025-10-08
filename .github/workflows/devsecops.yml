@@ -4,60 +4,71 @@ on: push
 
 jobs:
   # ----------------------------------------------------------------------
-  # 1. Job Dependances : Contrôle requirements.txt (Vérification des dépendances)
+  # 1° - Job Dependances : Contrôle requirements.txt (Scan statique Trivy)
   # ----------------------------------------------------------------------
   Dependances:
     runs-on: ubuntu-latest
     steps:
-      # Récupère le code de votre repository
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Utilise Trivy pour scanner le fichier requirements.txt
       - name: Scan Dependencies (requirements.txt) with Trivy
+        # Utilise l'action Trivy pour analyser le fichier de dépendances
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs' # Type de scan sur le système de fichiers
-          target: 'requirements.txt' # Cible le fichier spécifique
-          severity: 'HIGH,CRITICAL' # Fait échouer si HIGH ou CRITICAL sont trouvées
+          scan-type: 'fs' # Scan du filesystem pour les fichiers de dépendances
+          # L'action Trivy utilise 'input' pour spécifier le chemin du fichier lors d'un scan 'fs'
+          input: 'requirements.txt'
+          # Fait échouer le pipeline si des vulnérabilités HIGH ou CRITICAL sont trouvées
+          severity: 'HIGH,CRITICAL'
           exit-code: '1' 
           format: 'table'
   
   # ----------------------------------------------------------------------
-  # 2. Job Dockerfile_Scan : Contrôle du Dockerfile (Bonnes pratiques + Vulnérabilités de l'image)
+  # 2° - Job Dockerfile : Contrôle de l'image Dockerfile
   # ----------------------------------------------------------------------
-  # Renommé en Dockerfile_Scan pour clarté. Notez le "needs: Dependances" implicite.
-  Dockerfile_Scan:
+  Dockerfile:
     runs-on: ubuntu-latest
-    needs: Dependances # Se lance uniquement si le job Dependances a réussi
+    needs: Dependances # Se lance uniquement si le scan des dépendances est OK
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Étape 1 : Construire l'image Docker
+      # Étape 1 : Construire l'image Docker à partir de votre Dockerfile durci
       - name: Build Docker Image for Scan
-        # Cette action est nécessaire pour construire l'image avant de la scanner
         uses: docker/build-push-action@v5
         with:
           context: .
-          # IMPORTANT: Utilisez le nom de votre fichier Dockerfile durci
+          # IMPORTANT: Assurez-vous que ce nom de fichier existe dans votre repo !
           file: Dockerfile.hardened 
           tags: imghardened:latest
-          push: false # On ne déploie pas encore, on construit juste pour le scan
+          push: false # Construire l'image localement pour le scan
           
       # Étape 2 : Contrôle des bonnes pratiques du Dockerfile avec Dockle
-      - name: Scan Dockerfile Best Practices with Dockle
+      # Vérifie la conformité (non-root, nettoyage des caches, ajout de HEALTHCHECK, etc.)
+      - name: Test Dockerfile Best Practices with Dockle
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             goodwithtech/dockle:latest imghardened:latest
 
+      # Étape 3 : Contrôle des vulnérabilités de l'image finale avec Trivy
+      # Ce scan prend en compte les paquets OS et le résultat des étapes de build
+      - name: Scan Final Image Vulnerabilities with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'imghardened:latest' # Cible l'image que nous venons de construire
+          scan-type: 'image'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1' 
+          format: 'table'
+
   # ----------------------------------------------------------------------
-  # 3. Job Deploy : Déploiement (Se lance si tout est sécurisé)
+  # Job Deploy : Déploiement
   # ----------------------------------------------------------------------
   Deploy:
     runs-on: ubuntu-latest
-    needs: Dockerfile_Scan
+    needs: Dockerfile
     steps:
       - name: Deploy
         run: |
