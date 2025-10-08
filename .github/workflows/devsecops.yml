@@ -4,7 +4,7 @@ on: push
 
 jobs:
   # ----------------------------------------------------------------------
-  # 1° - Job Dependances : Contrôle requirements.txt (Scan statique Trivy)
+  # 1. Job Dependances : Contrôle requirements.txt (Scan statique Trivy)
   # ----------------------------------------------------------------------
   Dependances:
     runs-on: ubuntu-latest
@@ -13,19 +13,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Scan Dependencies (requirements.txt) with Trivy
-        # Utilise l'action Trivy pour analyser le fichier de dépendances
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs' # Scan du filesystem pour les fichiers de dépendances
-          # L'action Trivy utilise 'input' pour spécifier le chemin du fichier lors d'un scan 'fs'
+          scan-type: 'fs'
+          # CORRECTION: Utilisation de 'input' au lieu de 'target'
           input: 'requirements.txt'
-          # Fait échouer le pipeline si des vulnérabilités HIGH ou CRITICAL sont trouvées
           severity: 'HIGH,CRITICAL'
           exit-code: '1' 
           format: 'table'
   
   # ----------------------------------------------------------------------
-  # 2° - Job Dockerfile : Contrôle de l'image Dockerfile
+  # 2. Job Dockerfile : Contrôle de l'image Dockerfile
   # ----------------------------------------------------------------------
   Dockerfile:
     runs-on: ubuntu-latest
@@ -34,26 +32,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Étape 1 : Construire l'image Docker à partir de votre Dockerfile durci
+      # Étape 1 : Construction de l'image Docker à partir de votre Dockerfile durci
       - name: Build Docker Image for Scan
         uses: docker/build-push-action@v5
         with:
           context: .
-          # IMPORTANT: Assurez-vous que ce nom de fichier existe dans votre repo !
+          # Nécessite que le fichier 'Dockerfile.hardened' existe à la racine du dépôt
           file: Dockerfile.hardened 
           tags: imghardened:latest
-          push: false # Construire l'image localement pour le scan
+          push: false 
           
       # Étape 2 : Contrôle des bonnes pratiques du Dockerfile avec Dockle
-      # Vérifie la conformité (non-root, nettoyage des caches, ajout de HEALTHCHECK, etc.)
-      - name: Test Dockerfile Best Practices with Dockle
+      - name: Scan Dockerfile Best Practices with Dockle
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             goodwithtech/dockle:latest imghardened:latest
 
       # Étape 3 : Contrôle des vulnérabilités de l'image finale avec Trivy
-      # Ce scan prend en compte les paquets OS et le résultat des étapes de build
       - name: Scan Final Image Vulnerabilities with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -64,7 +60,7 @@ jobs:
           format: 'table'
 
   # ----------------------------------------------------------------------
-  # Job Deploy : Déploiement
+  # 3. Job Deploy : Déploiement
   # ----------------------------------------------------------------------
   Deploy:
     runs-on: ubuntu-latest
